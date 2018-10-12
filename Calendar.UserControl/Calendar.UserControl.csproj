@@ -47,12 +47,15 @@
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="CalendarSizeModes.cs" />
+    <Compile Include="CalendarViewModes.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <Compile Include="Themes\BlueTheme.cs" />
+    <Compile Include="Themes\ThemeBase.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Calendar.resx">
@@ -64,7 +67,7 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Resources\Calendar-icon.png" />
+    <EmbeddedResource Include="Resources\Calendar-icon.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
