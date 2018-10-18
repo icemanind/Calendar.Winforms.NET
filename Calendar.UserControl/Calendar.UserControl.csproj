@@ -46,8 +46,21 @@
     <Compile Include="Calendar.cs">
       <SubType>UserControl</SubType>
     </Compile>
+    <Compile Include="CalendarMouseEventArgs.cs" />
     <Compile Include="CalendarSizeModes.cs" />
     <Compile Include="CalendarViewModes.cs" />
+    <Compile Include="HolidayEvents\Christmas.cs" />
+    <Compile Include="HolidayEvents\ColumbusDay.cs" />
+    <Compile Include="HolidayEvents\Halloween.cs" />
+    <Compile Include="HolidayEvents\IndependenceDay.cs" />
+    <Compile Include="HolidayEvents\LaborDay.cs" />
+    <Compile Include="HolidayEvents\MartinLutherKing.cs" />
+    <Compile Include="HolidayEvents\MemorialDay.cs" />
+    <Compile Include="HolidayEvents\NewYears.cs" />
+    <Compile Include="HolidayEvents\PresidentsDay.cs" />
+    <Compile Include="HolidayEvents\Thanksgiving.cs" />
+    <Compile Include="HolidayEvents\VeteransDay.cs" />
+    <Compile Include="ICalendarEvent.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
@@ -68,6 +81,15 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\Calendar-icon.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="HolidayIcons\Pumpkin.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="HolidayIcons\ChristmasTree.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="HolidayIcons\Turkey.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

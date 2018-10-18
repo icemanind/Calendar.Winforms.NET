@@ -1,11 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
+﻿using System.Drawing;
 
 namespace Calendar.UserControl.Themes
 {
     public abstract class ThemeBase
     {
+        #region Abstract Properties
+        public abstract string ThemeName { get; }
+        #endregion
+
         #region Calendar Properties
         public virtual Color CalendarBackgroundColor => Color.FromArgb(160,210,230);
         public virtual Color CalendarBorderColor => Color.FromArgb(170, 170, 170);
@@ -17,7 +19,7 @@ namespace Calendar.UserControl.Themes
         #endregion
 
         #region Month/Year Display Properties
-        public virtual Color MonthYearTextColor => Color.FromArgb(0, 0, 0);
+        public virtual Color MonthYearTextColor => Color.FromArgb(60, 100, 160);
         public virtual Color MonthYearBackgroundColor => Color.Transparent;
         public virtual Font MonthYearFont => new Font("Arial", 12, FontStyle.Bold);
         #endregion

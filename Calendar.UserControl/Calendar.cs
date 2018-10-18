@@ -60,14 +60,70 @@ namespace Calendar.UserControl
         private Color _monthYearTextColor;
         private Color _monthYearBackgroundColor;
         private Font _monthYearFont;
+        private bool _renderHolidays;
 
         private bool _todayButtonHovered;
         private bool _previousMonthButtonHovered;
         private bool _nextMonthButtonHovered;
-        
+
+        private readonly List<ICalendarEvent> _calendarEvents;
+        private readonly List<ICalendarEvent> _holidayEvents;
+        private readonly Dictionary<Rectangle, ICalendarEvent> _eventsMatrix;
+        private readonly Dictionary<Rectangle, DateTime> _daysMatrix;
+
+        private readonly ToolTip _eventTooltip;
+        private Point _lastMousePoint;
+
+        #endregion
+
+        #region Delegates
+        public delegate void CalendarMouseClickHandler(object sender, CalendarMouseEventArgs e);
+
+        public delegate void CalendarEventClickHandler(object sender, CalendarMouseEventArgs e, ICalendarEvent ev);
+
+        public delegate void CalendarDayClickHandler(object sender, CalendarMouseEventArgs e, DateTime dt);
+
+        #endregion
+
+        #region Events
+        public event CalendarMouseClickHandler TodayButtonClicked;
+        public event CalendarMouseClickHandler PreviousMonthButtonClicked;
+        public event CalendarMouseClickHandler NextMonthButtonClicked;
+        public event CalendarEventClickHandler CalendarEventClicked;
+        public event CalendarDayClickHandler CalendarDayClicked;
+
+        public event CalendarMouseClickHandler TodayButtonDoubleClicked;
+        public event CalendarMouseClickHandler PreviousMonthButtonDoubleClicked;
+        public event CalendarMouseClickHandler NextMonthButtonDoubleClicked;
+        public event CalendarEventClickHandler CalendarEventDoubleClicked;
+        public event CalendarDayClickHandler CalendarDayDoubleClicked;
         #endregion
 
         #region Properties
+
+        public bool RenderHolidays
+        {
+            get => _renderHolidays;
+            set
+            {
+                _renderHolidays = value;
+                if (_holidayEvents == null)
+                {
+                    Refresh();
+                    return;
+                }
+                if (value)
+                    _holidayEvents.ForEach(z => RegisterEvent(z));
+                else _holidayEvents.ForEach(RemoveEvent);
+                Refresh();
+            }
+        }
+
+        public string CalendarTheme
+        {
+            get; private set;
+        }
+
         public Color PreviousMonthButtonBorderHoverColor
         {
             get => _previousMonthButtonBorderHoverColor;
@@ -560,6 +616,7 @@ namespace Calendar.UserControl
             ShowNextMonthButton = true;
             ShowMonthYear = true;
             ShowDaysOfWeek = true;
+            RenderHolidays = true;
 
             CalendarEventsFont = new Font("Arial", 12, FontStyle.Regular);
             CalendarFont = new Font("Arial", 11, FontStyle.Regular);
@@ -569,6 +626,25 @@ namespace Calendar.UserControl
             CalendarPadding = new Padding(10, 10, 10, 10);
 
             SetTheme(new Themes.BlueTheme());
+
+            _eventsMatrix = new Dictionary<Rectangle, ICalendarEvent>();
+            _daysMatrix = new Dictionary<Rectangle, DateTime>();
+            _holidayEvents = new List<ICalendarEvent>();
+            _lastMousePoint = new Point(0, 0);
+            _calendarEvents = new List<ICalendarEvent>();
+            _eventTooltip = new ToolTip();
+
+            _holidayEvents.Add(new HolidayEvents.NewYears());
+            _holidayEvents.Add(new HolidayEvents.MartinLutherKing());
+            _holidayEvents.Add(new HolidayEvents.MemorialDay());
+            _holidayEvents.Add(new HolidayEvents.PresidentsDay());
+            _holidayEvents.Add(new HolidayEvents.IndependenceDay());
+            _holidayEvents.Add(new HolidayEvents.LaborDay());
+            _holidayEvents.Add(new HolidayEvents.ColumbusDay());
+            _holidayEvents.Add(new HolidayEvents.VeteransDay());
+            _holidayEvents.Add(new HolidayEvents.Thanksgiving());
+            _holidayEvents.Add(new HolidayEvents.Halloween());
+            _holidayEvents.Add(new HolidayEvents.Christmas());
         }
 
         private void InitializeComponent()
@@ -581,6 +657,9 @@ namespace Calendar.UserControl
             this.Name = "Calendar";
             this.Size = new System.Drawing.Size(849, 571);
             this.Paint += new System.Windows.Forms.PaintEventHandler(this.Calendar_Paint);
+            this.MouseClick += new System.Windows.Forms.MouseEventHandler(this.Calendar_MouseClick);
+            this.MouseDoubleClick += new System.Windows.Forms.MouseEventHandler(this.Calendar_MouseDoubleClick);
+            this.MouseLeave += new System.EventHandler(this.Calendar_MouseLeave);
             this.MouseMove += new System.Windows.Forms.MouseEventHandler(this.Calendar_MouseMove);
             this.Resize += new System.EventHandler(this.Calendar_Resize);
             this.ResumeLayout(false);
@@ -588,8 +667,41 @@ namespace Calendar.UserControl
         }
         #endregion
 
+        public void RegisterEvent(params ICalendarEvent[] e)
+        {
+            foreach (ICalendarEvent ev in e)
+            {
+                if (_calendarEvents.FirstOrDefault(z => z.EventId == ev.EventId) == null)
+                {
+                    _calendarEvents.Add(ev);
+                }
+            }
+        }
+
+        public void RemoveEvent(ICalendarEvent e)
+        {
+            if (_calendarEvents.FirstOrDefault(z => z.EventId == e.EventId) != null)
+            {
+                _calendarEvents.Remove(e);
+            }
+        }
+
+        public void RemoveEvent(string eventName)
+        {
+            var list = new List<ICalendarEvent>();
+
+            foreach (ICalendarEvent e in _calendarEvents)
+            {
+                if (e.EventName != eventName) list.Add(e);
+            }
+
+            _calendarEvents.Clear();
+            _calendarEvents.AddRange(list);
+        }
+
         public void SetTheme(Themes.ThemeBase theme)
         {
+            CalendarTheme = theme.ThemeName;
             BackgroundColor = theme.CalendarBackgroundColor;
             BorderColor = theme.CalendarBorderColor;
             DaysFont = theme.DaysFont;
@@ -658,9 +770,70 @@ namespace Calendar.UserControl
                 if (ShowMonthYear) DrawMonthYear(g);
 
                 DrawCalendar(g);
+
+                RenderEvents(g);
             }
 
             e.Graphics.DrawImage(bitmap, 0, 0);
+        }
+
+        private void RenderEvents(Graphics g)
+        {
+            var dt = new DateTime(CalendarDate.Year, CalendarDate.Month, 1);
+            int offset = (int)dt.DayOfWeek;
+            int rows = SundaysInMonth(CalendarDate) + 1;
+            int topMargin = Math.Max(Math.Max(TodayButtonSize.Height, NextMonthButtonSize.Height),
+                                PreviousMonthButtonSize.Height) + 15;
+            int squareWidth = (Width - CalendarPadding.Left - CalendarPadding.Right) / 7;
+            int squareHeight = (Height - topMargin - CalendarPadding.Top - CalendarPadding.Bottom) / rows;
+            SizeF daysOfWeekFontSize = g.MeasureString("Sun", DaysOfTheWeekFont);
+
+            dt = dt.AddDays(-offset);
+
+            _eventsMatrix.Clear();
+            for (int row = 0; row < rows; row++)
+            {
+                for (int col = 0; col < 7; col++)
+                {
+                    if (dt.Month != CalendarDate.Month)
+                    {
+                        dt = dt.AddDays(1);
+                        continue;
+                    }
+
+                    int eventSize = 0;
+                    foreach (ICalendarEvent evnt in _calendarEvents)
+                    {
+                        if (evnt.ShouldRender(dt))
+                        {
+                            var rect2 = new Rectangle(squareWidth * col + CalendarPadding.Left,
+                                squareHeight * row + topMargin + CalendarPadding.Top, squareWidth, squareHeight);
+                            var rect1 = new Rectangle(squareWidth * col + 1 + CalendarPadding.Left,
+                                squareHeight * row + topMargin + CalendarPadding.Top + (int)daysOfWeekFontSize.Height + eventSize +
+                                (ShowDaysOfWeek && row == 0 ? (int)daysOfWeekFontSize.Height : 0),
+                                squareWidth - 1, evnt.EventHeight);
+                            if (evnt.EventHeight + eventSize > rect2.Height - rect1.Height - 3) continue;
+                            _eventsMatrix.Add(rect1, evnt);
+                            g.FillRectangle(new SolidBrush(evnt.BackgroundColor), rect1);
+                            var sf = new StringFormat
+                            {
+                                Trimming = StringTrimming.EllipsisCharacter,
+                                LineAlignment = StringAlignment.Center,
+                                Alignment = StringAlignment.Center
+                            };
+                            if (evnt.ShowIcon)
+                            {
+                                g.DrawImage(evnt.Icon, rect1.X, rect1.Y);
+                                rect1 = new Rectangle(rect1.X + evnt.Icon.Width, rect1.Y, rect1.Width - evnt.Icon.Width, rect1.Height);
+                            }
+                            g.DrawString(evnt.EventName, evnt.Font, new SolidBrush(evnt.TextColor), rect1, sf);
+                            eventSize += evnt.EventHeight;
+                        }
+                    }
+
+                    dt = dt.AddDays(1);
+                }
+            }
         }
 
         private void DrawMonthYear(Graphics g)
@@ -677,7 +850,7 @@ namespace Calendar.UserControl
             x += ShowNextMonthButton ? NextMonthButtonSize.Width + 10 : 0;
 
             var size = g.MeasureString(CalendarDate.ToString("MMMM yyyy"), MonthYearFont);
-            var rect = new Rectangle(x, y, (int) size.Width + 10, (int) Math.Max(size.Height, maxHeight));
+            var rect = new Rectangle(x, y, (int)size.Width + 10, (int)Math.Max(size.Height, maxHeight));
 
             var sf = new StringFormat
             {
@@ -704,8 +877,9 @@ namespace Calendar.UserControl
             Pen borderPen = new Pen(BorderColor, 1);
             SizeF daysOfWeekFontSize = g.MeasureString("Sun", DaysOfTheWeekFont);
 
+            _daysMatrix.Clear();
             var dt = new DateTime(CalendarDate.Year, CalendarDate.Month, 1);
-            int offset = (int) dt.DayOfWeek;
+            int offset = (int)dt.DayOfWeek;
 
             dt = dt.AddDays(-offset);
 
@@ -718,8 +892,8 @@ namespace Calendar.UserControl
                         SizeF numberFontSize = g.MeasureString(dt.Day.ToString(), DaysFont);
                         var rect1 = new Rectangle(squareWidth * col + 3 + CalendarPadding.Left,
                             squareHeight * row + topMargin + CalendarPadding.Top +
-                            (ShowDaysOfWeek && row == 0 ? (int) daysOfWeekFontSize.Height : 0),
-                            (int) numberFontSize.Width, (int) numberFontSize.Height);
+                            (ShowDaysOfWeek && row == 0 ? (int)daysOfWeekFontSize.Height : 0),
+                            (int)numberFontSize.Width, (int)numberFontSize.Height);
                         g.Clip = new Region(rect1);
                         g.FillRectangle(new SolidBrush(DaysBackgroundColor), rect1);
 
@@ -729,8 +903,13 @@ namespace Calendar.UserControl
                                 : new SolidBrush(DaysDisabledTextColor),
                             new Point(squareWidth * col + 3 + CalendarPadding.Left,
                                 squareHeight * row + topMargin + CalendarPadding.Top +
-                                (ShowDaysOfWeek && row == 0 ? (int) daysOfWeekFontSize.Height : 0)));
+                                (ShowDaysOfWeek && row == 0 ? (int)daysOfWeekFontSize.Height : 0)));
                         g.ResetClip();
+
+                        var rect2 = new Rectangle(squareWidth * col + CalendarPadding.Left,
+                            squareHeight * row + topMargin + CalendarPadding.Top, squareWidth, squareHeight);
+                        _daysMatrix.Add(rect2, dt);
+
                         dt = dt.AddDays(1);
                     }
                 }
@@ -912,6 +1091,145 @@ namespace Calendar.UserControl
             CheckIfMouseIsOverTodayButton(e.Location);
             CheckIfMouseIsOverPreviousMonthButton(e.Location);
             CheckIfMouseIsOverNextMonthButton(e.Location);
+            CheckIfMouseIsOverAnEvent(e.Location);
+        }
+
+        private void Calendar_MouseLeave(object sender, EventArgs e)
+        {
+            _todayButtonHovered = false;
+            _nextMonthButtonHovered = false;
+            _previousMonthButtonHovered = false;
+            Refresh();
+        }
+
+        private void Calendar_MouseClick(object sender, MouseEventArgs e)
+        {
+            CheckIfMouseClickedOnTodayButton(e.Location, e, false);
+            CheckIfMouseClickedOnPreviousMonthButton(e.Location, e, false);
+            CheckIfMouseClickedOnNextMonthButton(e.Location, e, false);
+            CheckIfMouseClickedOnEvent(e.Location, e, false);
+            CheckIfMouseClickedOnDayEvent(e.Location, e, false);
+        }
+
+        private void Calendar_MouseDoubleClick(object sender, MouseEventArgs e)
+        {
+            CheckIfMouseClickedOnTodayButton(e.Location, e, true);
+            CheckIfMouseClickedOnPreviousMonthButton(e.Location, e, true);
+            CheckIfMouseClickedOnNextMonthButton(e.Location, e, true);
+            CheckIfMouseClickedOnEvent(e.Location, e, true);
+            CheckIfMouseClickedOnDayEvent(e.Location, e, true);
+        }
+
+        private void CheckIfMouseClickedOnDayEvent(Point location, MouseEventArgs e, bool doubleClicked)
+        {
+            foreach (var r in _daysMatrix.ToList())
+            {
+                if (r.Key.Contains(location) && !_eventsMatrix.ToList().Any(z => z.Key.Contains(location)))
+                {
+                    var calendarEventArgs = new CalendarMouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta) { Handled = false };
+                    if (!doubleClicked)
+                        CalendarDayClicked?.Invoke(this, calendarEventArgs, r.Value);
+                    else
+                        CalendarDayDoubleClicked?.Invoke(this, calendarEventArgs, r.Value);
+                }
+            }
+        }
+
+        private void CheckIfMouseClickedOnEvent(Point location, MouseEventArgs e, bool doubleClicked)
+        {
+            foreach (var r in _eventsMatrix.ToList())
+            {
+                if (r.Key.Contains(location))
+                {
+                    var calendarEventArgs = new CalendarMouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta) { Handled = false };
+                    if (!doubleClicked)
+                        CalendarEventClicked?.Invoke(this, calendarEventArgs, r.Value);
+                    else
+                        CalendarEventDoubleClicked?.Invoke(this, calendarEventArgs, r.Value);
+                }
+            }
+        }
+
+        private void CheckIfMouseIsOverAnEvent(Point location)
+        {
+            if (location.X != _lastMousePoint.X || location.Y != _lastMousePoint.Y)
+            {
+                _lastMousePoint = new Point(location.X, location.Y);
+                bool foundContains = false;
+                foreach (var r in _eventsMatrix.ToList())
+                {
+                    if (r.Key.Contains(location))
+                    {
+                        foundContains = true;
+                        _eventTooltip.ShowAlways = true;
+                        _eventTooltip.Active = true;
+                        _eventTooltip.Show(r.Value.EventName, this, location.X, location.Y + 20);
+                    }
+                }
+
+                if (!foundContains)
+                {
+                    _eventTooltip.Hide(this);
+                }
+            }
+        }
+
+        private void CheckIfMouseClickedOnTodayButton(Point location, MouseEventArgs e, bool doubleClicked)
+        {
+            if (!ShowTodayButton) return;
+
+            var calendarEventArgs = new CalendarMouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta) { Handled = false };
+
+            var rect = new Rectangle(CalendarPadding.Left, CalendarPadding.Top, TodayButtonSize.Width,
+                TodayButtonSize.Height);
+
+            if (rect.Contains(location))
+            {
+                if (!doubleClicked)
+                    TodayButtonClicked?.Invoke(this, calendarEventArgs);
+                else
+                    TodayButtonDoubleClicked?.Invoke(this, calendarEventArgs);
+                if (!calendarEventArgs.Handled && e.Button == MouseButtons.Left && !doubleClicked) CalendarDate = DateTime.Now;
+            }
+        }
+
+        private void CheckIfMouseClickedOnPreviousMonthButton(Point location, MouseEventArgs e, bool doubleClicked)
+        {
+            if (!ShowPreviousMonthButton) return;
+
+            var calendarEventArgs = new CalendarMouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta) { Handled = false };
+
+            int leftMargin = ShowTodayButton ? TodayButtonSize.Width + 10 : 0;
+            var rect = new Rectangle(leftMargin + CalendarPadding.Left, CalendarPadding.Top, PreviousMonthButtonSize.Width, PreviousMonthButtonSize.Height);
+
+            if (rect.Contains(location))
+            {
+                if (!doubleClicked)
+                    PreviousMonthButtonClicked?.Invoke(this, calendarEventArgs);
+                else
+                    PreviousMonthButtonDoubleClicked?.Invoke(this, calendarEventArgs);
+                if (!calendarEventArgs.Handled && e.Button == MouseButtons.Left && !doubleClicked) CalendarDate = CalendarDate.AddMonths(-1);
+            }
+        }
+
+        private void CheckIfMouseClickedOnNextMonthButton(Point location, MouseEventArgs e, bool doubleClicked)
+        {
+            if (!ShowNextMonthButton) return;
+
+            var calendarEventArgs = new CalendarMouseEventArgs(e.Button, e.Clicks, e.X, e.Y, e.Delta) { Handled = false };
+
+            int leftMargin = ShowTodayButton ? TodayButtonSize.Width + 10 : 0;
+            leftMargin += ShowPreviousMonthButton ? PreviousMonthButtonSize.Width + 3 : 0;
+            var rect = new Rectangle(leftMargin + CalendarPadding.Left, CalendarPadding.Top, NextMonthButtonSize.Width, NextMonthButtonSize.Height);
+
+            if (rect.Contains(location))
+            {
+                if (!doubleClicked)
+                    NextMonthButtonClicked?.Invoke(this, calendarEventArgs);
+                else
+                    NextMonthButtonDoubleClicked?.Invoke(this, calendarEventArgs);
+                if (!calendarEventArgs.Handled && e.Button == MouseButtons.Left && !doubleClicked) CalendarDate = CalendarDate.AddMonths(1);
+            }
         }
 
         private void CheckIfMouseIsOverTodayButton(Point location)
